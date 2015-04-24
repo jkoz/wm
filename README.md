@@ -2,6 +2,8 @@
 
 A lightweight window manager (~250 LOC)
 
+![](https://raw.github.com/jkoz/i/master/wm.png)
+
 
 ##Installing
 ```sh
