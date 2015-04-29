@@ -1,27 +1,28 @@
 CFLAGS += -std=c99 -g -pedantic -Wall -Os -I/usr/X11R6/include
-LDFLAGS	+= -lxcb -L/usr/X11R6/lib
-SRC	=  wm.c
-OBJ	=  ${SRC:.c=.o}
-RM	?= /bin/rm
-PREFIX	?= /usr
+LDFLAGS += -lxcb -L/usr/X11R6/lib
+PROG = wm
+SRC =  ${PROG}.c
+OBJ =  ${SRC:.c=.o}
+RM ?= /bin/rm
+PREFIX ?= /usr
 
-all: wm
+all: ${PROG}
 
 .c.o: ${SRC}
 	@echo CC $<
 	@${CC} -c ${CFLAGS} $<
 
-${OBJ}: config.h
+${OBJ}:
 
-wm: ${OBJ}
+${PROG}: ${OBJ}
 	@echo LD $@
 	@${CC} -o $@ ${OBJ} ${LDFLAGS}
 
-clean: ${OBJ} wm
-	${RM} ${OBJ} wm
+clean: ${OBJ} ${PROG}
+	${RM} ${OBJ} ${PROG}
 
-install: wm
-	install -m 755 wm ${DESTDIR}${PREFIX}/bin/wm
+install: ${PROG}
+	install -m 755 ${PROG} ${DESTDIR}${PREFIX}/bin/${PROG}
 
-uninstall: ${DESTDIR}${PREFIX}/bin/wm
-	${RM} ${DESTDIR}${PREFIX}/bin/wm
+uninstall: ${DESTDIR}${PREFIX}/bin/${PROG}
+	${RM} ${DESTDIR}${PREFIX}/bin/${PROG}

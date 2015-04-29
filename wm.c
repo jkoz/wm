@@ -3,39 +3,38 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <err.h>
+#include <stdbool.h>
+#include <syslog.h>
+#include <sys/queue.h>
 
-enum { INACTIVE, ACTIVE };
+#define MOD XCB_MOD_MASK_4
+#define BORDERWITH 2
+#define FOCUSCOL   0x00ffff33
+#define UNFOCUSCOL 0x15000000
+#define ENABLE_MOUSE
 
-/* global variables */
 static int sigcode;
 static xcb_connection_t *conn;
 static xcb_screen_t *scr;
 static xcb_window_t focuswin;
 static void (*events[XCB_NO_OPERATION])(xcb_generic_event_t *e);
-uint32_t values[3];
+static bool moved;
 
-static void sigcatch(const int sig);
+static void sigcatch(const int);
 static void quit();
-static void map_handler(xcb_generic_event_t *e);
-static void create_handler(xcb_generic_event_t *e);
-static void configure_handler(xcb_generic_event_t *e);
-static void destroy_handler(xcb_generic_event_t *e);
+static void map_notify_handler(xcb_generic_event_t*);
+static void create_notify_handler(xcb_generic_event_t*);
+static void destroy_handler(xcb_generic_event_t*);
 
 #ifdef ENABLE_MOUSE
-static void button_press_handler(xcb_generic_event_t *e);
-static void button_release_handler(xcb_generic_event_t *e);
-static void motion_notify_handler(xcb_generic_event_t *e);
-#endif
-#ifdef ENABLE_SLOPPY
-static void enter_notify_handler(xcb_generic_event_t *e);
+static void button_press_handler(xcb_generic_event_t*);
+static void button_release_handler(xcb_generic_event_t*);
+static void motion_notify_handler(xcb_generic_event_t*);
 #endif
 
-static void subscribe(xcb_window_t);
 static void cleanup(void);
-static  int deploy(void);
-static void focus(xcb_window_t, int);
-
-#include "config.h"
+static void focus(xcb_window_t);
+static int deploy(void);
 
 static void sigcatch(const int sig) {
     sigcode = sig;
@@ -49,28 +48,26 @@ static void quit() {
 static void cleanup(void) {
     if (conn != NULL)
         xcb_disconnect(conn);
+    closelog();
 }
 
-static void create_handler(xcb_generic_event_t *ev) {
+static void create_notify_handler(xcb_generic_event_t *ev) {
+    syslog(LOG_INFO, "create_notify_handler()");
     xcb_create_notify_event_t *e = (xcb_create_notify_event_t *)ev;
     if (!e->override_redirect) {
-        subscribe(e->window);
-        focus(e->window, ACTIVE);
+        uint32_t values[] = { XCB_EVENT_MASK_ENTER_WINDOW, XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY };
+        xcb_change_window_attributes(conn, e->window, XCB_CW_EVENT_MASK, values);
+        uint32_t values2[] = { BORDERWITH };
+        xcb_configure_window(conn, e->window, XCB_CONFIG_WINDOW_BORDER_WIDTH, values2);
     }
 }
 
-static void configure_handler(xcb_generic_event_t *ev) {
-    xcb_configure_notify_event_t *e = (xcb_configure_notify_event_t *)ev;
-    if (e->window != focuswin)
-        focus(e->window, INACTIVE);
-    focus(focuswin, ACTIVE);
-}
-
-static void map_handler(xcb_generic_event_t *ev) {
+static void map_notify_handler(xcb_generic_event_t *ev) {
+    syslog(LOG_INFO, "map_notify_handler()");
     xcb_map_notify_event_t *e = (xcb_map_notify_event_t *)ev;
     if (!e->override_redirect) {
         xcb_map_window(conn, e->window);
-        focus(e->window, ACTIVE);
+        focus(e->window);
     }
 }
 
@@ -81,99 +78,67 @@ static void destroy_handler(xcb_generic_event_t *ev) {
 
 #ifdef ENABLE_MOUSE
 static void button_press_handler(xcb_generic_event_t *ev) {
-    xcb_get_geometry_reply_t *geom;
-
+    syslog(LOG_INFO, "button_press_handler()");
     xcb_button_press_event_t *e = (xcb_button_press_event_t *)ev;
-    xcb_window_t win = e->child;
 
-    if (!win || win == scr->root)
-        return;
+    if (e->child && e->child != scr->root) {
+        xcb_set_input_focus(conn, XCB_INPUT_FOCUS_POINTER_ROOT, e->child, XCB_CURRENT_TIME);
 
-    values[0] = XCB_STACK_MODE_ABOVE;
-    xcb_configure_window(conn, win, XCB_CONFIG_WINDOW_STACK_MODE, values);
-    geom = xcb_get_geometry_reply(conn, xcb_get_geometry(conn, win), NULL);
+        uint32_t values[] = { XCB_STACK_MODE_ABOVE };
+        xcb_configure_window(conn, e->child, XCB_CONFIG_WINDOW_STACK_MODE, values);
 
-    if (e->detail == 1) {
-        values[2] = 1;
-        xcb_warp_pointer(conn, XCB_NONE, win, 0, 0, 0,
-            0, geom->width/2, geom->height/2);
-    } else {
-        values[2] = 3;
-        xcb_warp_pointer(conn, XCB_NONE, win, 0, 0, 0,
-                0, geom->width, geom->height);
+        moved = e->detail == 1 ? true : moved;
+
+        focus(e->child);
+
+        xcb_grab_pointer(conn, 0, scr->root, XCB_EVENT_MASK_BUTTON_RELEASE | XCB_EVENT_MASK_BUTTON_MOTION | XCB_EVENT_MASK_POINTER_MOTION_HINT,
+            XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC, scr->root, XCB_NONE, XCB_CURRENT_TIME);
+        xcb_flush(conn);
     }
-    xcb_grab_pointer(conn, 0, scr->root, XCB_EVENT_MASK_BUTTON_RELEASE | XCB_EVENT_MASK_BUTTON_MOTION | XCB_EVENT_MASK_POINTER_MOTION_HINT,
-        XCB_GRAB_MODE_ASYNC, XCB_GRAB_MODE_ASYNC, scr->root, XCB_NONE, XCB_CURRENT_TIME);
-    xcb_flush(conn);
 }
 
 static void motion_notify_handler(xcb_generic_event_t *ev) {
-    xcb_get_geometry_reply_t *geom;
-
     xcb_motion_notify_event_t *e = (xcb_motion_notify_event_t *)ev;
-    xcb_window_t win = e->child;
+    if (moved) {
+        xcb_get_geometry_reply_t *geom = xcb_get_geometry_reply(conn, xcb_get_geometry(conn, e->child), NULL);
+        if (geom) {
+            uint32_t values[2];
 
-    xcb_query_pointer_reply_t *pointer;
-    pointer = xcb_query_pointer_reply(conn, xcb_query_pointer(conn, scr->root), 0);
-    if (values[2] == 1) {
-        geom = xcb_get_geometry_reply(conn, xcb_get_geometry(conn, win), NULL);
-        if (!geom)
-            return;
+            xcb_query_pointer_reply_t *pointer = xcb_query_pointer_reply(conn, xcb_query_pointer(conn, scr->root), 0);
+            if (pointer->root_x < geom->width / 2)
+                values[0] = 0;
+            else
+                values[0] = (pointer->root_x + geom->width / 2 > scr->width_in_pixels - BORDERWITH*2) ? scr->width_in_pixels - geom->width - BORDERWITH*2 : pointer->root_x - geom->width / 2;
 
-        values[0] = (pointer->root_x + geom->width / 2 > scr->width_in_pixels - (BORDERWIDTH*2)) ? scr->width_in_pixels - geom->width - (BORDERWIDTH*2)
-            : pointer->root_x - geom->width / 2;
-        values[1] = (pointer->root_y + geom->height / 2 > scr->height_in_pixels - (BORDERWIDTH*2)) ? (scr->height_in_pixels - geom->height - (BORDERWIDTH*2))
-            : pointer->root_y - geom->height / 2;
+            if (pointer->root_y < geom->height / 2)
+                values[1] = 0;
+            else
+                values[1] = (pointer->root_y + geom->height / 2 > scr->height_in_pixels) ? scr->height_in_pixels - geom->height - BORDERWITH*2 : pointer->root_y - geom->height / 2;
 
-        if (pointer->root_x < geom->width/2)
-            values[0] = 0;
-        if (pointer->root_y < geom->height/2)
-            values[1] = 0;
-
-        xcb_configure_window(conn, win, XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y, values);
-        xcb_flush(conn);
-    } else if (values[2] == 3) {
-        geom = xcb_get_geometry_reply(conn, xcb_get_geometry(conn, win), NULL);
-        values[0] = pointer->root_x - geom->x;
-        values[1] = pointer->root_y - geom->y;
-        xcb_configure_window(conn, win, XCB_CONFIG_WINDOW_WIDTH | XCB_CONFIG_WINDOW_HEIGHT, values);
-        xcb_flush(conn);
+            xcb_configure_window(conn, e->child, XCB_CONFIG_WINDOW_X | XCB_CONFIG_WINDOW_Y, values);
+            xcb_flush(conn);
+        }
     }
 }
 
 static void button_release_handler(xcb_generic_event_t *ev) {
-    xcb_button_release_event_t *e = (xcb_button_release_event_t *)ev;
-    xcb_window_t win = e->child;
-    focus(win, ACTIVE);
     xcb_ungrab_pointer(conn, XCB_CURRENT_TIME);
-}
-#endif
-
-#ifdef ENABLE_SLOPPY
-static void enter_notify_handler(xcb_generic_event_t *e) {
-    focus(((xcb_enter_notify_event_t *) ev)->event, ACTIVE);
 }
 #endif
 
 static int deploy(void) {
 
     for (unsigned int i=0; i < XCB_NO_OPERATION; i++) events[i] = NULL;
-    events[XCB_MAP_NOTIFY] = map_handler;
-    events[XCB_CREATE_NOTIFY] = create_handler;
-    events[XCB_CONFIGURE_NOTIFY] = configure_handler;
+    events[XCB_MAP_NOTIFY] = map_notify_handler;
+    events[XCB_CREATE_NOTIFY] = create_notify_handler;
     events[XCB_DESTROY_NOTIFY] = destroy_handler;
 #ifdef ENABLE_MOUSE
     events[XCB_BUTTON_PRESS] = button_press_handler;
     events[XCB_BUTTON_RELEASE] = button_release_handler;
     events[XCB_MOTION_NOTIFY] = motion_notify_handler;
 #endif
-#ifdef ENABLE_SLOPPY
-    events[XCB_ENTER_NOTIFY] = enter_notify_handler;
-#endif
 
-    /* init xcb and grab events */
-    uint32_t values[2];
-    int mask;
+    openlog ("wm", LOG_CONS | LOG_PID | LOG_NDELAY, LOG_LOCAL1);
 
     if (xcb_connection_has_error(conn = xcb_connect(NULL, NULL)))
         return -1;
@@ -182,49 +147,29 @@ static int deploy(void) {
     focuswin = scr->root;
 
 #ifdef ENABLE_MOUSE
-    xcb_grab_button(conn, 0, scr->root, XCB_EVENT_MASK_BUTTON_PRESS |
-            XCB_EVENT_MASK_BUTTON_RELEASE, XCB_GRAB_MODE_ASYNC,
-            XCB_GRAB_MODE_ASYNC, scr->root, XCB_NONE, 1, MOD);
-
-    xcb_grab_button(conn, 0, scr->root, XCB_EVENT_MASK_BUTTON_PRESS |
-            XCB_EVENT_MASK_BUTTON_RELEASE, XCB_GRAB_MODE_ASYNC,
-            XCB_GRAB_MODE_ASYNC, scr->root, XCB_NONE, 3, MOD);
+    xcb_grab_button(conn, 0, scr->root, XCB_EVENT_MASK_BUTTON_PRESS | XCB_EVENT_MASK_BUTTON_RELEASE, XCB_GRAB_MODE_ASYNC,
+            XCB_GRAB_MODE_ASYNC, scr->root, XCB_NONE, XCB_STACK_MODE_ABOVE, MOD);
 #endif
 
-    mask = XCB_CW_EVENT_MASK;
-    values[0] = XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
-    xcb_change_window_attributes_checked(conn, scr->root, mask, values);
-
+    uint32_t values[] = { XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY };
+    xcb_change_window_attributes_checked(conn, scr->root, XCB_CW_EVENT_MASK, values);
     xcb_flush(conn);
 
     return 0;
 }
 
-static void focus(xcb_window_t win, int mode) {
-    uint32_t values[1];
-    values[0] = mode ? FOCUSCOL : UNFOCUSCOL;
+static void focus(xcb_window_t win) {
+    /* focus current window*/
+    uint32_t values[] = { FOCUSCOL };
     xcb_change_window_attributes(conn, win, XCB_CW_BORDER_PIXEL, values);
+    xcb_set_input_focus(conn, XCB_INPUT_FOCUS_POINTER_ROOT, win, XCB_CURRENT_TIME);
 
-    if (mode == ACTIVE) {
-        xcb_set_input_focus(conn, XCB_INPUT_FOCUS_POINTER_ROOT, win, XCB_CURRENT_TIME);
-        if (win != focuswin) {
-            focus(focuswin, INACTIVE);
-            focuswin = win;
-        }
+    /* unfocus previous window*/
+    if (focuswin != win) {
+        values[0] = UNFOCUSCOL;
+        xcb_change_window_attributes(conn, focuswin, XCB_CW_BORDER_PIXEL, values);
+        focuswin = win;
     }
-}
-
-static void subscribe(xcb_window_t win) {
-    uint32_t values[2];
-
-    /* subscribe to events */
-    values[0] = XCB_EVENT_MASK_ENTER_WINDOW;
-    values[1] = XCB_EVENT_MASK_SUBSTRUCTURE_NOTIFY;
-    xcb_change_window_attributes(conn, win, XCB_CW_EVENT_MASK, values);
-
-    /* border width */
-    values[0] = BORDERWIDTH;
-    xcb_configure_window(conn, win, XCB_CONFIG_WINDOW_BORDER_WIDTH, values);
 }
 
 static void run(void) {
