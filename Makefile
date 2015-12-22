@@ -6,7 +6,13 @@ OBJ =  ${SRC:.c=.o}
 RM ?= /bin/rm
 PREFIX ?= /usr
 
-all: ${PROG}
+all: options ${PROG}
+
+options:
+	@echo wm build options:
+	@echo "CFLAGS   = ${CFLAGS}"
+	@echo "LDFLAGS  = ${LDFLAGS}"
+	@echo "CC       = ${CC}"
 
 .c.o: ${SRC}
 	@echo CC $<
