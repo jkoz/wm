@@ -28,7 +28,8 @@ clean: ${OBJ} ${PROG}
 	${RM} ${OBJ} ${PROG}
 
 install: ${PROG}
-	install -m 755 ${PROG} ${DESTDIR}${PREFIX}/bin/${PROG}
+	@mkdir ${DESTDIR}${PREFIX}/bin
+	install -m755 ${PROG} ${DESTDIR}${PREFIX}/bin/${PROG}
 
 uninstall: ${DESTDIR}${PREFIX}/bin/${PROG}
 	${RM} ${DESTDIR}${PREFIX}/bin/${PROG}
