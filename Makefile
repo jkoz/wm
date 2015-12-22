@@ -3,7 +3,6 @@ LDFLAGS += -lxcb -L/usr/X11R6/lib
 PROG = wm
 SRC =  ${PROG}.c
 OBJ =  ${SRC:.c=.o}
-RM ?= /bin/rm
 PREFIX ?= /usr
 
 all: options ${PROG}
@@ -25,11 +24,11 @@ ${PROG}: ${OBJ}
 	@${CC} -o $@ ${OBJ} ${LDFLAGS}
 
 clean: ${OBJ} ${PROG}
-	${RM} ${OBJ} ${PROG}
+	@rm ${OBJ} ${PROG}
 
 install: ${PROG}
 	@mkdir -p ${DESTDIR}${PREFIX}/bin
 	install -m755 ${PROG} ${DESTDIR}${PREFIX}/bin/${PROG}
 
-uninstall: ${DESTDIR}${PREFIX}/bin/${PROG}
-	${RM} ${DESTDIR}${PREFIX}/bin/${PROG}
+uninstall:
+	@rm -f ${DESTDIR}${PREFIX}/bin/${PROG}
