@@ -28,7 +28,7 @@ clean: ${OBJ} ${PROG}
 	${RM} ${OBJ} ${PROG}
 
 install: ${PROG}
-	@mkdir ${DESTDIR}${PREFIX}/bin
+	@mkdir -p ${DESTDIR}${PREFIX}/bin
 	install -m755 ${PROG} ${DESTDIR}${PREFIX}/bin/${PROG}
 
 uninstall: ${DESTDIR}${PREFIX}/bin/${PROG}
