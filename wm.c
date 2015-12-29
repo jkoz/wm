@@ -8,7 +8,7 @@
 #include <sys/queue.h>
 
 #define MOD XCB_MOD_MASK_4
-#define BORDERWITH 2
+#define BORDERWITH 0
 #define FOCUSCOL   0x00ffff33
 #define UNFOCUSCOL 0x15000000
 #define ENABLE_MOUSE

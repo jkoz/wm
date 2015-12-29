@@ -3,7 +3,7 @@ LDFLAGS += -lxcb -L/usr/X11R6/lib
 PROG = wm
 SRC =  ${PROG}.c
 OBJ =  ${SRC:.c=.o}
-PREFIX ?= /usr
+PREFIX ?= /usr/local
 
 all: options ${PROG}
 
